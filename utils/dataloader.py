@@ -1,0 +1,248 @@
+import numpy as np
+from torch.utils.data import Dataset
+from PIL import Image
+from utils.utils import cvtColor, preprocess_input,get_classes
+from utils.anchors import get_anchors
+
+class SSDDataset(Dataset):
+    def __init__(self, annotations_lines, input_shape, num_classes, anchors, random, overlap_threshold=0.5):
+        super(SSDDataset, self).__init__()
+        self.annotations_lines = annotations_lines
+        self.input_shape = input_shape
+        self.random = random
+        self.num_classes = num_classes
+        self.num_anchors = len(anchors)
+        self.iou_threshold = overlap_threshold
+        self.anchors = anchors
+
+
+    def __len__(self):
+        return len(self.annotations_lines)
+
+    def __getitem__(self, index):
+        image, box = self.get_item_data(self.annotations_lines[index], self.input_shape, self.random)
+        image_data = np.transpose(preprocess_input(np.array(image, dtype=np.float32)), (2, 0, 1))
+        if len(box) != 0:
+           boxes = np.array(box[:, :4], dtype=np.float32)
+           # 进行归一化，调整到0-1之间
+           boxes[:, [0, 2]] = boxes[:, [0, 2]] / self.input_shape[1]
+           boxes[:, [1, 3]] = boxes[:, [1, 3]] / self.input_shape[0]
+           # 对真实框的种类进行one hot处理
+           one_hot_label = np.eye(self.num_classes - 1)[np.array(box[:, 4], np.int32)]
+           # 拼接成为 [x1,y1,x2,y2,(one hot class)]
+           box = np.concatenate([boxes, one_hot_label], axis=-1)
+        box = self.assign_boxes(box)
+
+        return np.array(image_data, np.float32), np.array(box, np.float32)
+
+    def get_item_data(self, annotations_line, input_shape, random):
+        data = annotations_line.split()
+        image_dir = data[0]
+        boxes_label = data[1:]
+        # print("imgdir=", image_dir)
+        # print("boxes_label=", boxes_label)
+
+        image = Image.open(image_dir)
+        image = cvtColor(image)
+
+        iw, ih = image.size
+        h, w = input_shape
+
+        boxes = np.array([np.array(list(map(int, box.split(',')))) for box in boxes_label])
+
+        if not random:
+            scale = min(w/iw, h/ih)
+            nw = int(iw*scale)
+            nh = int(ih*scale)
+            dx = (w-nw)//2
+            dy = (h-nh)//2
+
+            #---------------------------------#
+            #   将图像多余的部分加上灰条
+            #---------------------------------#
+            image = image.resize((nw, nh), Image.BICUBIC)
+            new_image = Image.new('RGB', (w, h), (128, 128, 128))
+            new_image.paste(image, (dx, dy))
+            image_data = np.array(new_image, np.float32)
+
+            #---------------------------------#
+            #   对真实框进行调整
+            #---------------------------------#
+            if len(boxes) > 0:
+                # np.random.shuffle(boxes)
+                boxes[:, [0, 2]] = boxes[:, [0, 2]] * nw / iw + dx
+                boxes[:, [1, 3]] = boxes[:, [1, 3]] * nh / ih + dy
+                boxes[:, 0:2][boxes[:, 0:2] < 0] = 0
+                boxes[:, 2][boxes[:, 2] > w] = w
+                boxes[:, 3][boxes[:, 3] > h] = h
+                box_w = boxes[:, 2] - boxes[:, 0]
+                box_h = boxes[:, 3] - boxes[:, 1]
+                boxes = boxes[np.logical_and(box_w>1, box_h>1)] # discard invalid box
+            return image_data, boxes
+
+    def assign_boxes(self, boxes):
+        # 4 代表 x1,x2,y1,y2 + 分类onehot + 置信度
+        assignment = np.zeros((self.num_anchors, 4 + self.num_classes + 1))
+        # 将one_hot编码的第一位设置为默认背景
+        assignment[:, 4] = 1.0
+
+        if len(boxes) == 0:
+            return assignment
+
+        # 针对每一个真实框和 所有的8732个先验框计算iou
+        encoded_boxes = np.apply_along_axis(self.encode_box, 1, boxes[:, :4])
+
+        # 这里4+True 是因为在上一步计算encode_box 的过程中 除 Center_x1_diff,Center_x2_diff,diffW,diffY 额外返回了iou 值
+        encoded_boxes = encoded_boxes.reshape(-1, self.num_anchors, 4 + True)
+
+        # 站在先验框的角度（8732个先验框） 与 每一个真实框的iou [4,8732]
+        best_iou = encoded_boxes[:, :, -1].max(axis=0)
+        best_iou_index = encoded_boxes[:, :, -1].argmax(axis=0)
+        best_iou_mask = best_iou > 0
+        best_iou_index = best_iou_index[best_iou_mask]
+
+        #---------------------------------------------------#
+        #   计算一共有多少先验框满足需求
+        #---------------------------------------------------#
+        assign_num = len(best_iou_index)
+        # 将编码后的真实框取出
+        encoded_boxes = encoded_boxes[:, best_iou_mask, :]
+        # TODO 这里得画图理解
+        # 前四位 赋值编码后的 中心点x y偏差，wh 偏差值
+        assignment[:, :4][best_iou_mask] = encoded_boxes[best_iou_index, np.arange(assign_num), :4]
+        # 4代表为背景的概率，设定为0，因为这些先验框有对应的物体
+        assignment[:, 4][best_iou_mask] = 0
+        # 将预测框与真实框iou最大的index 对应 分类 one_hot编码赋值过去
+        assignment[:, 5:-1][best_iou_mask] = boxes[best_iou_index, 4:]
+        # -1表示先验框是否有对应的物体
+        assignment[:, -1][best_iou_mask] = 1
+        # 通过assign_boxes我们就获得了，输入进来的这张图片，应该有的预测结果是什么样子的
+        return assignment
+        # # ---------------------------------------------------#
+        # #   assignment分为3个部分
+        # #   :4      的内容为网络应该有的回归预测结果
+        # #   4:-1    的内容为先验框所对应的种类，默认为背景
+        # #   -1      的内容为当前先验框是否包含目标
+        # # ---------------------------------------------------#
+        # assignment = np.zeros((self.num_anchors, 4 + self.num_classes + 1))
+        # assignment[:, 4] = 1.0
+        # if len(boxes) == 0:
+        #     return assignment
+        #
+        # # 对每一个真实框都进行iou计算
+        # encoded_boxes = np.apply_along_axis(self.encode_box, 1, boxes[:, :4])
+        # # ---------------------------------------------------#
+        # #   在reshape后，获得的encoded_boxes的shape为：
+        # #   [num_true_box, num_anchors, 4 + 1]
+        # #   4是编码后的结果，1为iou
+        # # ---------------------------------------------------#
+        # encoded_boxes = encoded_boxes.reshape(-1, self.num_anchors, 5)
+        #
+        # # ---------------------------------------------------#
+        # #   [num_anchors]求取每一个先验框重合度最大的真实框
+        # # ---------------------------------------------------#
+        # best_iou = encoded_boxes[:, :, -1].max(axis=0)
+        # best_iou_idx = encoded_boxes[:, :, -1].argmax(axis=0)
+        # best_iou_mask = best_iou > 0
+        # best_iou_idx = best_iou_idx[best_iou_mask]
+        #
+        # # ---------------------------------------------------#
+        # #   计算一共有多少先验框满足需求
+        # # ---------------------------------------------------#
+        # assign_num = len(best_iou_idx)
+        #
+        # # 将编码后的真实框取出
+        # encoded_boxes = encoded_boxes[:, best_iou_mask, :]
+        # # ---------------------------------------------------#
+        # #   编码后的真实框的赋值
+        # # ---------------------------------------------------#
+        # assignment[:, :4][best_iou_mask] = encoded_boxes[best_iou_idx, np.arange(assign_num), :4]
+        # # ----------------------------------------------------------#
+        # #   4代表为背景的概率，设定为0，因为这些先验框有对应的物体
+        # # ----------------------------------------------------------#
+        # assignment[:, 4][best_iou_mask] = 0
+        # assignment[:, 5:-1][best_iou_mask] = boxes[best_iou_idx, 4:]
+        # # ----------------------------------------------------------#
+        # #   -1表示先验框是否有对应的物体
+        # # ----------------------------------------------------------#
+        # assignment[:, -1][best_iou_mask] = 1
+        # # 通过assign_boxes我们就获得了，输入进来的这张图片，应该有的预测结果是什么样子的
+        # return assignment
+
+    def encode_box(self, boxes, return_iou = True,variances=[0.1, 0.1, 0.2, 0.2]): # TODO  variances ？？
+        # 计算预测框 和 当前GT 之间的iou
+        iou = self.iou(boxes)
+        encoded_box = np.zeros((self.num_anchors, 4 + return_iou))
+
+        assign_mask = iou > self.iou_threshold
+
+        # 如果没有任何预测框与真实框iou>iou_threshold，那么取iou最大的作为正样本
+        if not assign_mask.any():
+            assign_mask[iou.argmax()] = True
+
+        if return_iou:
+            # 给 assign_mask 最后一位赋值 iou
+            encoded_box[:, -1][assign_mask] = iou[assign_mask]
+
+        # 那些iou 是 作为正样本，找到对应先验框
+        assign_anchors = self.anchors[assign_mask]
+
+        # ---------------------------------------------#
+        #   逆向编码，将真实框转化为ssd预测结果的格式
+        #   先计算真实框的中心与长宽
+        # ---------------------------------------------#
+        # (x1,y1 +  x2,y2) / 2
+        box_center = 0.5 * (boxes[:2] + boxes[2:])
+        box_wh = boxes[2:] - boxes[:2]
+
+        # 计算符合正样本的预测框之间的中心点、宽、高
+        assign_box_center = (assign_anchors[:, 0:2] + assign_anchors[:, 2:4]) * 0.5
+        assign_box_wh = (assign_anchors[:, 2:4] - assign_anchors[:, 0:2])
+
+        encoded_box[:, 0:2][assign_mask] = box_center - assign_box_center
+        encoded_box[:, 0:2][assign_mask] /= assign_box_wh
+        encoded_box[:, 0:2][assign_mask] /= np.array(variances)[:2]
+
+        encoded_box[:, 2:4][assign_mask] = np.log(box_wh / assign_box_wh)
+        encoded_box[:, 2:4][assign_mask] /= np.array(variances)[2:4]
+
+        return encoded_box
+
+
+    def iou(self, box):
+        inter_upleft = np.maximum(self.anchors[:, :2], box[:2])
+        inter_rightbottom = np.minimum(self.anchors[:, 2:4], box[2:4])
+
+        inter_wh = inter_rightbottom - inter_upleft
+        inter_wh = np.maximum(inter_wh, 0)
+
+        # 相交部分面积
+        inter_area = inter_wh[:, 0] * inter_wh[:, 1]
+
+        # 真实框面积
+        gt_box_wh = box[2:4] - box[0:2]
+        true_area = gt_box_wh[0] * gt_box_wh[1]
+
+        # 先验框面积
+        anchors_box_wh = self.anchors[:, 2:4] - self.anchors[:, :2]
+        anchors_box_area = anchors_box_wh[:,0] * anchors_box_wh[:, 1]
+
+        iou = inter_area / (anchors_box_area + true_area - inter_area)
+
+        return iou
+
+if __name__ == "__main__":
+    annotations_lines = []
+    with open('../2007_train.txt', 'r') as f:
+        annotations_lines = f.readlines()
+
+    backbone        = "vgg"
+    anchors_size    = [30, 60, 111, 162, 213, 264, 315]
+    class_names, num_classes = get_classes('../model_data/voc_classes.txt')
+    num_classes += 1
+    anchors = get_anchors([300, 300], anchors_size, backbone)
+
+    dataloader = SSDDataset(annotations_lines, [300, 300], num_classes, anchors, False)
+    image_data, boxes = dataloader[0]
+    print("OK")
+

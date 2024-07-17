@@ -1,0 +1,10 @@
+*__pycache__*
+.idea
+model_data/ssd_weights.pth
+model_data/vgg16-397923af.pth
+tensorboard_logs
+tensorboard_logs/*
+VOCdevkit/*
+weight_logs
+2007_train.txt
+2007_val.txt
