@@ -53,7 +53,6 @@ class SSD300(nn.Module):
         if backbone_name == 'vgg':
             self.vgg = vgg(pretrained)
             self.extras = add_extra(1024, backbone_name)
-            self.weight = nn.Parameter(torch.Tensor(512))
             self.L2Norm = L2Norm(512, 20)
             mbox = [4, 6, 6, 6, 4, 4]
 

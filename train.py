@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from utils.utils import down_load_weight, get_classes, weights_init,get_lr_scheduler,set_optimizer_lr, ssd_collect_fn
 from utils.anchors import get_anchors
 from nets.ssd import SSD300
-from nets.ssd_loss import MutilBoxLoss
+from nets.ssd_training import MutilBoxLoss
 from utils.dataloader import SSDDataset
 from utils.utils_fit import fit_one_epoch
 
@@ -60,7 +60,6 @@ if model_path != '':
 
 # 获取损失函数
 loss_fn = MutilBoxLoss()
-loss_fn.to(device)
 
 # 记录loss
 writer = SummaryWriter(log_dir='./tensorboard_logs')
@@ -133,7 +132,7 @@ epoch_valid_step = num_valid // batch_size
 if epoch_train_step == 0 or epoch_valid_step == 0:
     raise ValueError("数据集过小，无法继续进行训练，请扩充数据集。")
 
-train_dataset = SSDDataset(train_lines, input_shape, num_classes, anchors, False)  # TODO random 在训练的时候可以改为True,做对应的数据增强处理
+train_dataset = SSDDataset(train_lines, input_shape, num_classes, anchors, True)  # TODO random 在训练的时候可以改为True,做对应的数据增强处理
 valid_dataset = SSDDataset(valid_lines, input_shape, num_classes, anchors, False)  # TODO random 在训练的时候可以改为True,做对应的数据增强处理
 
 train_dataloader = DataLoader(train_dataset, batch_size, True, drop_last=True, collate_fn=ssd_collect_fn)
@@ -164,4 +163,4 @@ for epoch in range(Init_Epoch, UnFreeze_Epoch):
 
     # 动态更新学习率
     set_optimizer_lr(optimizer, lr_rate_func, epoch)
-    fit_one_epoch(model, loss_fn, train_dataloader, valid_dataloader, optimizer, epoch, UnFreeze_Epoch, writer, device, save_period, save_dir)
+    fit_one_epoch(model, loss_fn, train_dataloader, valid_dataloader, epoch_train_step, epoch_valid_step ,optimizer, epoch, UnFreeze_Epoch, writer, device, save_period, save_dir)

@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 from torch.utils.data import Dataset
 from PIL import Image
@@ -20,7 +21,7 @@ class SSDDataset(Dataset):
         return len(self.annotations_lines)
 
     def __getitem__(self, index):
-        image, box = self.get_item_data(self.annotations_lines[index], self.input_shape, self.random)
+        image, box = self.get_item_data(self.annotations_lines[index], self.input_shape, random=self.random)
         image_data = np.transpose(preprocess_input(np.array(image, dtype=np.float32)), (2, 0, 1))
         if len(box) != 0:
            boxes = np.array(box[:, :4], dtype=np.float32)
@@ -35,50 +36,124 @@ class SSDDataset(Dataset):
 
         return np.array(image_data, np.float32), np.array(box, np.float32)
 
-    def get_item_data(self, annotations_line, input_shape, random):
+    def get_item_data(self, annotations_line, input_shape, jitter=.3, hue=.1, sat=0.7, val=0.4, random=False):
         data = annotations_line.split()
         image_dir = data[0]
         boxes_label = data[1:]
-        # print("imgdir=", image_dir)
-        # print("boxes_label=", boxes_label)
-
+        # print("imgdir=", line[0])
+        # print("boxes_label=", line[1:])
+        # ------------------------------#
+        #   读取图像并转换成RGB图像
+        # ------------------------------#
         image = Image.open(image_dir)
         image = cvtColor(image)
-
+        # ------------------------------#
+        #   获得图像的高宽与目标高宽
+        # ------------------------------#
         iw, ih = image.size
         h, w = input_shape
-
-        boxes = np.array([np.array(list(map(int, box.split(',')))) for box in boxes_label])
+        # ------------------------------#
+        #   获得预测框
+        # ------------------------------#
+        box = np.array([np.array(list(map(int, box.split(',')))) for box in boxes_label])
 
         if not random:
-            scale = min(w/iw, h/ih)
-            nw = int(iw*scale)
-            nh = int(ih*scale)
-            dx = (w-nw)//2
-            dy = (h-nh)//2
+            scale = min(w / iw, h / ih)
+            nw = int(iw * scale)
+            nh = int(ih * scale)
+            dx = (w - nw) // 2
+            dy = (h - nh) // 2
 
-            #---------------------------------#
+            # ---------------------------------#
             #   将图像多余的部分加上灰条
-            #---------------------------------#
+            # ---------------------------------#
             image = image.resize((nw, nh), Image.BICUBIC)
             new_image = Image.new('RGB', (w, h), (128, 128, 128))
             new_image.paste(image, (dx, dy))
             image_data = np.array(new_image, np.float32)
 
-            #---------------------------------#
+            # ---------------------------------#
             #   对真实框进行调整
-            #---------------------------------#
-            if len(boxes) > 0:
-                # np.random.shuffle(boxes)
-                boxes[:, [0, 2]] = boxes[:, [0, 2]] * nw / iw + dx
-                boxes[:, [1, 3]] = boxes[:, [1, 3]] * nh / ih + dy
-                boxes[:, 0:2][boxes[:, 0:2] < 0] = 0
-                boxes[:, 2][boxes[:, 2] > w] = w
-                boxes[:, 3][boxes[:, 3] > h] = h
-                box_w = boxes[:, 2] - boxes[:, 0]
-                box_h = boxes[:, 3] - boxes[:, 1]
-                boxes = boxes[np.logical_and(box_w>1, box_h>1)] # discard invalid box
-            return image_data, boxes
+            # ---------------------------------#
+            if len(box) > 0:
+                # np.random.shuffle(box)
+                box[:, [0, 2]] = box[:, [0, 2]] * nw / iw + dx
+                box[:, [1, 3]] = box[:, [1, 3]] * nh / ih + dy
+                box[:, 0:2][box[:, 0:2] < 0] = 0
+                box[:, 2][box[:, 2] > w] = w
+                box[:, 3][box[:, 3] > h] = h
+                box_w = box[:, 2] - box[:, 0]
+                box_h = box[:, 3] - box[:, 1]
+                box = box[np.logical_and(box_w > 1, box_h > 1)]  # discard invalid box
+
+            return image_data, box
+
+        # ------------------------------------------#
+        #   对图像进行缩放并且进行长和宽的扭曲
+        # ------------------------------------------#
+        new_ar = iw / ih * self.rand(1 - jitter, 1 + jitter) / self.rand(1 - jitter, 1 + jitter)
+        scale = self.rand(.25, 2)
+        if new_ar < 1:
+            nh = int(scale * h)
+            nw = int(nh * new_ar)
+        else:
+            nw = int(scale * w)
+            nh = int(nw / new_ar)
+        image = image.resize((nw, nh), Image.BICUBIC)
+
+        # ------------------------------------------#
+        #   将图像多余的部分加上灰条
+        # ------------------------------------------#
+        dx = int(self.rand(0, w - nw))
+        dy = int(self.rand(0, h - nh))
+        new_image = Image.new('RGB', (w, h), (128, 128, 128))
+        new_image.paste(image, (dx, dy))
+        image = new_image
+
+        # ------------------------------------------#
+        #   翻转图像
+        # ------------------------------------------#
+        flip = self.rand() < .5
+        if flip: image = image.transpose(Image.FLIP_LEFT_RIGHT)
+
+        image_data = np.array(image, np.uint8)
+        # ---------------------------------#
+        #   对图像进行色域变换
+        #   计算色域变换的参数
+        # ---------------------------------#
+        r = np.random.uniform(-1, 1, 3) * [hue, sat, val] + 1
+        # ---------------------------------#
+        #   将图像转到HSV上
+        # ---------------------------------#
+        hue, sat, val = cv2.split(cv2.cvtColor(image_data, cv2.COLOR_RGB2HSV))
+        dtype = image_data.dtype
+        # ---------------------------------#
+        #   应用变换
+        # ---------------------------------#
+        x = np.arange(0, 256, dtype=r.dtype)
+        lut_hue = ((x * r[0]) % 180).astype(dtype)
+        lut_sat = np.clip(x * r[1], 0, 255).astype(dtype)
+        lut_val = np.clip(x * r[2], 0, 255).astype(dtype)
+
+        image_data = cv2.merge((cv2.LUT(hue, lut_hue), cv2.LUT(sat, lut_sat), cv2.LUT(val, lut_val)))
+        image_data = cv2.cvtColor(image_data, cv2.COLOR_HSV2RGB)
+
+        # ---------------------------------#
+        #   对真实框进行调整
+        # ---------------------------------#
+        if len(box) > 0:
+            np.random.shuffle(box)
+            box[:, [0, 2]] = box[:, [0, 2]] * nw / iw + dx
+            box[:, [1, 3]] = box[:, [1, 3]] * nh / ih + dy
+            if flip: box[:, [0, 2]] = w - box[:, [2, 0]]
+            box[:, 0:2][box[:, 0:2] < 0] = 0
+            box[:, 2][box[:, 2] > w] = w
+            box[:, 3][box[:, 3] > h] = h
+            box_w = box[:, 2] - box[:, 0]
+            box_h = box[:, 3] - box[:, 1]
+            box = box[np.logical_and(box_w > 1, box_h > 1)]
+
+        return image_data, box
 
     def assign_boxes(self, boxes):
         # 4 代表 x1,x2,y1,y2 + 分类onehot + 置信度
@@ -87,6 +162,7 @@ class SSDDataset(Dataset):
         assignment[:, 4] = 1.0
 
         if len(boxes) == 0:
+            print("ERR!!, len(boxes) == 0")
             return assignment
 
         # 针对每一个真实框和 所有的8732个先验框计算iou
@@ -118,58 +194,8 @@ class SSDDataset(Dataset):
         assignment[:, -1][best_iou_mask] = 1
         # 通过assign_boxes我们就获得了，输入进来的这张图片，应该有的预测结果是什么样子的
         return assignment
-        # # ---------------------------------------------------#
-        # #   assignment分为3个部分
-        # #   :4      的内容为网络应该有的回归预测结果
-        # #   4:-1    的内容为先验框所对应的种类，默认为背景
-        # #   -1      的内容为当前先验框是否包含目标
-        # # ---------------------------------------------------#
-        # assignment = np.zeros((self.num_anchors, 4 + self.num_classes + 1))
-        # assignment[:, 4] = 1.0
-        # if len(boxes) == 0:
-        #     return assignment
-        #
-        # # 对每一个真实框都进行iou计算
-        # encoded_boxes = np.apply_along_axis(self.encode_box, 1, boxes[:, :4])
-        # # ---------------------------------------------------#
-        # #   在reshape后，获得的encoded_boxes的shape为：
-        # #   [num_true_box, num_anchors, 4 + 1]
-        # #   4是编码后的结果，1为iou
-        # # ---------------------------------------------------#
-        # encoded_boxes = encoded_boxes.reshape(-1, self.num_anchors, 5)
-        #
-        # # ---------------------------------------------------#
-        # #   [num_anchors]求取每一个先验框重合度最大的真实框
-        # # ---------------------------------------------------#
-        # best_iou = encoded_boxes[:, :, -1].max(axis=0)
-        # best_iou_idx = encoded_boxes[:, :, -1].argmax(axis=0)
-        # best_iou_mask = best_iou > 0
-        # best_iou_idx = best_iou_idx[best_iou_mask]
-        #
-        # # ---------------------------------------------------#
-        # #   计算一共有多少先验框满足需求
-        # # ---------------------------------------------------#
-        # assign_num = len(best_iou_idx)
-        #
-        # # 将编码后的真实框取出
-        # encoded_boxes = encoded_boxes[:, best_iou_mask, :]
-        # # ---------------------------------------------------#
-        # #   编码后的真实框的赋值
-        # # ---------------------------------------------------#
-        # assignment[:, :4][best_iou_mask] = encoded_boxes[best_iou_idx, np.arange(assign_num), :4]
-        # # ----------------------------------------------------------#
-        # #   4代表为背景的概率，设定为0，因为这些先验框有对应的物体
-        # # ----------------------------------------------------------#
-        # assignment[:, 4][best_iou_mask] = 0
-        # assignment[:, 5:-1][best_iou_mask] = boxes[best_iou_idx, 4:]
-        # # ----------------------------------------------------------#
-        # #   -1表示先验框是否有对应的物体
-        # # ----------------------------------------------------------#
-        # assignment[:, -1][best_iou_mask] = 1
-        # # 通过assign_boxes我们就获得了，输入进来的这张图片，应该有的预测结果是什么样子的
-        # return assignment
 
-    def encode_box(self, boxes, return_iou = True,variances=[0.1, 0.1, 0.2, 0.2]): # TODO  variances ？？
+    def encode_box(self, boxes, return_iou = True, variances=[0.1, 0.1, 0.2, 0.2]): # TODO  variances ？？
         # 计算预测框 和 当前GT 之间的iou
         iou = self.iou(boxes)
         encoded_box = np.zeros((self.num_anchors, 4 + return_iou))
@@ -208,6 +234,8 @@ class SSDDataset(Dataset):
 
         return encoded_box
 
+    def rand(self, a=0, b=1):
+        return np.random.rand() * (b - a) + a
 
     def iou(self, box):
         inter_upleft = np.maximum(self.anchors[:, :2], box[:2])
@@ -245,4 +273,3 @@ if __name__ == "__main__":
     dataloader = SSDDataset(annotations_lines, [300, 300], num_classes, anchors, False)
     image_data, boxes = dataloader[0]
     print("OK")
-

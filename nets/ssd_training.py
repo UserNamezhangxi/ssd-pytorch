@@ -36,17 +36,18 @@ class MutilBoxLoss(nn.Module):
 
         # 5 是从第一个分类不是背景开始，到最后一个分类 判断除过正样本之外的样本（负样本）的概率比较大（接近正样本概率的样本）
         every_pred_box_is_hard_to_classes_P = torch.sum(y_pred[:, :, 5:25], dim=2)
-        every_pred_box_is_hard_to_classes_P = ((1 - y_true[:, :, -1]) * every_pred_box_is_hard_to_classes_P).view(-1)
+        every_pred_box_is_hard_to_classes_P = (every_pred_box_is_hard_to_classes_P * (1 - y_true[:, :, -1])).view(-1)
 
         _, indices = torch.topk(every_pred_box_is_hard_to_classes_P, k=int(num_neg.cpu().numpy().tolist()))
         neg_conf_loss = torch.gather(classes_loss.view([-1]), 0, indices)
 
         # 归一化
         num_pos = torch.where(num_pos != 0, num_pos, torch.ones_like(num_pos))
-        # print("=part1 {},part2 {}, part3 {}".format(pos_classes_loss, neg_conf_loss, self.alpha * pos_loc_loss))
-        # print("part1 {},part2 {}, part3 {}".format(torch.sum(pos_classes_loss), torch.sum(neg_conf_loss), torch.sum(self.alpha * pos_loc_loss)))
         total_loss = torch.sum(pos_classes_loss) + torch.sum(neg_conf_loss) + torch.sum(self.alpha * pos_loc_loss)
         total_loss = total_loss / torch.sum(num_pos)
+        if total_loss == torch.nan:
+            print(" =part1 {},part2 {}, part3 {}".format(pos_classes_loss, neg_conf_loss, self.alpha * pos_loc_loss))
+            print(" part1 {},part2 {}, part3 {}".format(torch.sum(pos_classes_loss), torch.sum(neg_conf_loss), torch.sum(self.alpha * pos_loc_loss)))
         return total_loss
 
     # 分类损失
