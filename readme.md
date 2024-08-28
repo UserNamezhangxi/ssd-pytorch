@@ -92,8 +92,8 @@ if __name__ == "__main__":
 
 最后经过修正边界，分类和NMS过滤就得到最终的预测结果
 过程如下：
-![img](./img_readme/net.png)
-![img](./img_readme/conf.png)
+![img](./img_readme/net.PNG)
+![img](./img_readme/conf.PNG)
 其中匹配上的预测框 (cx,cy,dw,dh)分别是网络输出的回归偏移量，并非最终的坐标，需要进行转换后才能转为坐标值
 具体转换关系见2.2.2小结中 通过网络预测的结果 求出 $d^{cx}$、$d^{cy}$ $d^{w}$、$d^{h}$
 
