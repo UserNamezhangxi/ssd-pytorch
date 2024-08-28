@@ -25,22 +25,22 @@ def add_extra(in_channel, backbone_name):
 
 
 class L2Norm(nn.Module):
-    def __init__(self,n_channels, scale):
-        super(L2Norm,self).__init__()
+    def __init__(self, n_channels, scale):
+        super(L2Norm, self).__init__()
         self.n_channels = n_channels
-        self.gamma      = scale or None
-        self.eps        = 1e-10
-        self.weight     = nn.Parameter(torch.Tensor(self.n_channels))
+        self.gamma = scale or None
+        self.eps = 1e-10
+        self.weight = nn.Parameter(torch.Tensor(self.n_channels))
         self.reset_parameters()
 
     def reset_parameters(self):
-        init.constant_(self.weight,self.gamma)
+        init.constant_(self.weight, self.gamma)
 
     def forward(self, x):
-        norm    = x.pow(2).sum(dim=1, keepdim=True).sqrt()+self.eps
-        #x /= norm
-        x       = torch.div(x,norm)
-        out     = self.weight.unsqueeze(0).unsqueeze(2).unsqueeze(3).expand_as(x) * x
+        norm = x.pow(2).sum(dim=1, keepdim=True).sqrt() + self.eps
+        # x /= norm
+        x = torch.div(x, norm)
+        out = self.weight.unsqueeze(0).unsqueeze(2).unsqueeze(3).expand_as(x) * x
         return out
 
 class SSD300(nn.Module):
@@ -57,26 +57,25 @@ class SSD300(nn.Module):
             mbox = [4, 6, 6, 6, 4, 4]
 
             backbone_source = [21, -2]
-            #---------------------------------------------------#
+            # ---------------------------------------------------#
             #   在vgg获得的特征层里
-            #   第21层和-2层可以用来进行回归预测和分类预测。
+            #   第21层和-2特征层数据可以用来进行回归预测和分类预测。
             #   分别是conv4-3(38,38,512)和conv7(19,19,1024)的输出
-            #---------------------------------------------------#
+            # ---------------------------------------------------#
             for k, v in enumerate(backbone_source, 0):
                 loc_layers += [nn.Conv2d(self.vgg[v].out_channels, mbox[k] * 4, kernel_size=3, padding=1)]
                 conf_layers += [nn.Conv2d(self.vgg[v].out_channels, mbox[k] * number_classes, kernel_size=3, padding=1)]
 
             # 在add_extras获得的特征层里
-            # 第1层、第3层、第5层、第7层可以用来进行回归预测和分类预测。
+            # 第1层、第3层、第5层、第7层特征层数据可以用来进行回归预测和分类预测。
             # shape分别为(10,10,512), (5,5,256), (3,3,256), (1,1,256)
-            for k, v in enumerate(self.extras[1::2], 2): # 参数2 代表mbox 中 index = 2
+            for k, v in enumerate(self.extras[1::2], 2):  # 参数2 代表mbox 中 index = 2
                 loc_layers += [nn.Conv2d(v.out_channels, mbox[k] * 4, kernel_size=3, padding=1)]
                 conf_layers += [nn.Conv2d(v.out_channels, mbox[k] * number_classes, kernel_size=3, padding=1)]
 
         self.loc = nn.ModuleList(loc_layers)
         self.conf = nn.ModuleList(conf_layers)
         self.backbone_name = backbone_name
-
 
     # def normalize(self, x):
     #     x = F.normalize(x)
@@ -115,14 +114,13 @@ class SSD300(nn.Module):
             location.append(l(x).permute(0, 2, 3, 1).contiguous())
             confidence.append(c(x).permute(0, 2, 3, 1).contiguous())
 
-
         # 进行resize,将每一个特征层的位置坐标取出在 1 轴上进行堆叠
         # 进行resize,将每一个特征层的置信度取出在 1 轴上进行堆叠
         loc = torch.cat([loc.view(loc.size(0), -1) for loc in location], 1)
         conf = torch.cat([conf.view(conf.size(0), -1) for conf in confidence], 1)
 
         outputs = (
-            loc.view(loc.size(0), -1, 4), # shape(2,8732,4)
-            conf.view(conf.size(0), -1, self.number_classes) # (2,8732,21) TODO 这里的2是什么意思
+            loc.view(loc.size(0), -1, 4),  # shape(batch_size,8732,4)
+            conf.view(conf.size(0), -1, self.number_classes)  # (batch_size,8732,21)
         )
         return outputs

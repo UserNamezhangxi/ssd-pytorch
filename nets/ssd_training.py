@@ -22,7 +22,7 @@ class MutilBoxLoss(nn.Module):
 
         # 所有正样本的损失
         pos_classes_loss = torch.sum(classes_loss * y_true[:, :, -1], 1)
-        pos_loc_loss = torch.sum(loc_loss * y_true[:, :, -1] , 1)
+        pos_loc_loss = torch.sum(loc_loss * y_true[:, :, -1], 1)
 
         # 每一个图的正样本个数
         num_pos = torch.sum(y_true[:, :, -1], -1)

