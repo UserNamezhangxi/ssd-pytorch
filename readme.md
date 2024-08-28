@@ -192,7 +192,7 @@ default boxes 和 ground truth 匹配原则
 
 2、定位损失
 
-![img](./img_readme/loss.png)
+![img](./img_readme/loss.PNG)
 
 其中类别损失可以写为
 
@@ -233,7 +233,7 @@ neg_conf_loss = torch.gather(classes_loss.view([-1]), 0, indices)
 
 位置损失采用了 $smooth_{L1} $ loss，该损失的计算要回归至 default bounding box (简记为 d) 的中心 ( c x , c y )及宽度(w )和高度(h )的偏移量。公式如下：
 
-![img](./img_readme/loc_loss.png)
+![img](./img_readme/loc_loss.PNG)
 
 - 其中$x_{ij}^k$ 表示第i个预测框与第j个真实框的类别是k是否匹配：0,1
 
@@ -245,11 +245,11 @@ neg_conf_loss = torch.gather(classes_loss.view([-1]), 0, indices)
 
   调整后的第i个预测框相对于第j个gt box的中心、宽高分别是
 
-  ![img](./img_readme/loc_calc.png)
+![img](./img_readme/loc_calc.PNG)
 
 SmoothL1公式：
 
-![img](./img_readme/smooth_l1.png)
+![img](./img_readme/smooth_l1.PNG)
 
 定位损失计算参考代码：
 
